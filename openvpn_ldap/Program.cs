@@ -1,4 +1,8 @@
 ﻿using System;
+using System.Collections.Concurrent;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Configuration;
 using System.Text.RegularExpressions;
 using Novell.Directory.Ldap;
@@ -11,7 +15,7 @@ namespace Mono_ldap
 		public string Domain { get; set;}
 		public string[] AccessGroups { get; set; }
 		public string[] DeniedGroups { get; set; }
-		public string DomainController { get; set; }
+		public string[] DomainControllers { get; set; }
 		public int DomainControllerPort { get; set; }
 		public bool EnableSSL { get; set; }
 		public string Username { get; set; }
@@ -35,7 +39,7 @@ namespace Mono_ldap
 				Console.WriteLine(String.Concat(DateTime.Now.ToShortTimeString(), " ", DateTime.Now.ToShortDateString(), " ERROR: Cannot parse config file: missing 'domainController' argument"));
 			}
 			else {
-				DomainController = domainController;
+				DomainControllers = String.IsNullOrEmpty(domainController) ? new string[] { } : Array.ConvertAll(domainController.Split(','), p => p.Trim());
 			}
 			EnableSSL = Convert.ToBoolean(enableSSL);
 			if (Convert.ToInt32(domainControllerPort) == 0) {
@@ -69,10 +73,11 @@ namespace Mono_ldap
 			string password = "testpassword";
 			*/
 
+
 			try
 			{
 				OpenVPNConfig config = new OpenVPNConfig(ConfigurationManager.AppSettings["domain"], ConfigurationManager.AppSettings["accessGroups"], ConfigurationManager.AppSettings["deniedGroups"],
-											 ConfigurationManager.AppSettings["domainController"], ConfigurationManager.AppSettings["domainControllerPort"],
+											 ConfigurationManager.AppSettings["domainControllers"], ConfigurationManager.AppSettings["domainControllerPort"],
 														 ConfigurationManager.AppSettings["enableSSL"], username, password);
 				try
 				{
@@ -235,31 +240,53 @@ namespace Mono_ldap
 		}
 		public static LdapConnection BuildConnection(OpenVPNConfig config)
 		{
-			LdapConnection connection = new LdapConnection();
-			//add ssl options
-			if (config.EnableSSL)
+			
+			var resultCollection = new ConcurrentBag<LdapConnection>();
+			ParallelLoopResult res = Parallel.ForEach(config.DomainControllers, (dcServer, state) =>
 			{
-				connection.SecureSocketLayer = true;
-				connection.UserDefinedServerCertValidationDelegate += new CertificateValidationCallback(CustomSSLHandler);
-			}
-			try
-			{
-				//try to bind connection with credentials
-				connection.Connect(config.DomainController, config.DomainControllerPort);
-				connection.Bind(config.DomainUsername, config.Password);
-				if (connection.Connected)
+
+				LdapConnection connection = new LdapConnection();
+				//add ssl options
+				if (config.EnableSSL)
 				{
-					return connection;
+					connection.SecureSocketLayer = true;
+					connection.UserDefinedServerCertValidationDelegate += new CertificateValidationCallback(CustomSSLHandler);
+				}
+				try
+				{
+					//try to bind connection with credentials
+					connection.Connect(dcServer, config.DomainControllerPort);
+					connection.Bind(config.DomainUsername, config.Password);
+					if (connection.Connected)
+					{
+						resultCollection.Add(connection);
+						state.Stop();
+					}
+
+				}
+				catch
+				{
+					Console.WriteLine(String.Concat(DateTime.Now.ToShortTimeString(), " ", DateTime.Now.ToShortDateString(), " ERROR: Cannot bind connection to LDAP ", dcServer));
+
+				}
+			});
+
+				LdapConnection usedConnection;
+				resultCollection.TryTake(out usedConnection);
+				//disconnect other
+				LdapConnection c;
+				while (resultCollection.TryTake(out c))
+				{
+					c.Disconnect();
+				}
+				if (usedConnection != null)
+				{
+					return usedConnection;
 				}
 				else {
 					throw new System.Exception("Error: Cannot bind connection to LDAP");
 				}
-			}
-			catch
-			{
-				Console.WriteLine(String.Concat(DateTime.Now.ToShortTimeString(), " ", DateTime.Now.ToShortDateString(), " ERROR: Cannot bind connection to LDAP"));
-				throw new System.Exception("Error: Cannot bind connection to LDAP");
-			}
+				
 		}
 	}
 
