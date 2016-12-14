@@ -1,7 +1,5 @@
 ﻿using System;
 using System.Collections.Concurrent;
-using System.Linq;
-using System.Threading;
 using System.Threading.Tasks;
 using System.Configuration;
 using System.Text.RegularExpressions;
@@ -24,10 +22,10 @@ namespace Mono_ldap
 		public string DomainUsername { get; set; }
 
 
-		public OpenVPNConfig(string domain, string accessGroups,  string deniedGroups, string domainController, string domainControllerPort, string enableSSL, string username, string password )
+		public OpenVPNConfig(string domain, string accessGroups,  string deniedGroups, string domainControllers, string domainControllerPort, string enableSSL, string username, string password )
 		{
 			if (String.IsNullOrEmpty(domain)) {
-				Console.WriteLine(String.Concat(DateTime.Now.ToShortTimeString()," ", DateTime.Now.ToShortDateString(), " ERROR: Cannot parse config file: missing 'domain' argument"));
+				Console.WriteLine("Auth failed. Reason: cannot parse config file: missing 'domain' argument");
 				throw new System.ArgumentException("Missing 'domain' argument in app.config");
 			}
 			else {
@@ -35,11 +33,12 @@ namespace Mono_ldap
 			}
 			AccessGroups = String.IsNullOrEmpty(accessGroups) ? new string[] { } : Array.ConvertAll(accessGroups.Split(','), p => p.Trim());
 			DeniedGroups = String.IsNullOrEmpty(deniedGroups) ? new string[] { } : Array.ConvertAll(deniedGroups.Split(','), p => p.Trim());
-			if (String.IsNullOrEmpty(domainController)) {
-				Console.WriteLine(String.Concat(DateTime.Now.ToShortTimeString(), " ", DateTime.Now.ToShortDateString(), " ERROR: Cannot parse config file: missing 'domainController' argument"));
+			if (String.IsNullOrEmpty(domainControllers)) {
+				Console.WriteLine("Auth failed. Reason: cannot parse config file: missing 'domainControllers' argument");
+				throw new System.ArgumentException("Missing 'domainControllers' argument in app.config");
 			}
 			else {
-				DomainControllers = String.IsNullOrEmpty(domainController) ? new string[] { } : Array.ConvertAll(domainController.Split(','), p => p.Trim());
+				DomainControllers = String.IsNullOrEmpty(domainControllers) ? new string[] { } : Array.ConvertAll(domainControllers.Split(','), p => p.Trim());
 			}
 			EnableSSL = Convert.ToBoolean(enableSSL);
 			if (Convert.ToInt32(domainControllerPort) == 0) {
@@ -65,13 +64,14 @@ namespace Mono_ldap
 			string password = Environment.GetEnvironmentVariable("password");
 			if (String.IsNullOrEmpty(username) || String.IsNullOrEmpty(password))
 			{
-				Console.WriteLine("environment variables username or password undefined");
+				Console.WriteLine("Auth failed. Reason: environment variables username or password undefined.");
 				System.Environment.Exit(1);
 			}
 			/*for testing
 			string username = @"domain\testusername";
 			string password = "testpassword";
 			*/
+
 
 
 			try
@@ -91,8 +91,8 @@ namespace Mono_ldap
 						{
 							//user was found in rejectGroup
 							//AUTH FAILED. EXIT
-							Console.WriteLine(String.Concat(DateTime.Now.ToShortTimeString(), DateTime.Now.ToShortDateString(), " ERROR: User was found in the reject group. Access denied. User: ", config.Username));
 							connection.Disconnect();
+							Console.WriteLine("Auth failed for: '{0}'. Reason: user was found in the reject group.", config.Username);
 							return 1;
 						}
 					}
@@ -104,14 +104,15 @@ namespace Mono_ldap
 							//user was found in permit Group
 							//AUTH PASSED
 							connection.Disconnect();
+							Console.WriteLine("Auth success for: '{0}'.", config.Username);
 							return 0;
 
 						}
 						else {
 							//user wasn't found in permitGroup
 							//AUTH FAILED. EXIT
-							Console.WriteLine(String.Concat(DateTime.Now.ToShortTimeString(), " ", DateTime.Now.ToShortDateString(), " ERROR: User wasn't found in the permit group. Access denied. User: ", config.Username));
 							connection.Disconnect();
+							Console.WriteLine("Auth failed for: '{0}'. Reason: user wasn't found in the permit group.", config.Username);
 							return 1;
 						}
 
@@ -119,17 +120,18 @@ namespace Mono_ldap
 					connection.Disconnect();
 					//All tests passed.
 					//AUTH PASS. SUCCESS.
+					Console.WriteLine("Auth success for: '{0}'.", config.Username);
 					return 0;
 				}
 				catch 
 				{
-					Console.WriteLine(String.Concat(DateTime.Now.ToShortTimeString(), " ", DateTime.Now.ToShortDateString(), " ERROR: Exit. User: ", config.Username));
+					Console.WriteLine("Auth failed for: '{0}'", config.Username);
 					return 1;
 				}
 			}
 			catch
 			{
-				Console.WriteLine(String.Concat(DateTime.Now.ToShortTimeString(), " ", DateTime.Now.ToShortDateString(), " ERROR: Something wrong in the configuration file. Exit"));
+				Console.WriteLine("Auth failed. Reason: something wrong in the configuration file");
 				return 1;
 			}
 
@@ -197,7 +199,8 @@ namespace Mono_ldap
 			}
 			catch (LdapException e)
 			{
-				Console.WriteLine(String.Concat(DateTime.Now.ToShortTimeString(), " ", DateTime.Now.ToShortDateString(), " ERROR: Cannot find the group DN: ", groupName ,". (Maybe wrong groupname? ) ", e.ToString()));
+				
+				Console.WriteLine("ERROR: Cannot find the group DN {0} (Maybe wrong groupname? ) ", groupName);
 				throw new System.Exception(e.ToString());
 
 			}
@@ -264,9 +267,9 @@ namespace Mono_ldap
 					}
 
 				}
-				catch
+				catch (LdapException)
 				{
-					Console.WriteLine(String.Concat(DateTime.Now.ToShortTimeString(), " ", DateTime.Now.ToShortDateString(), " ERROR: Cannot bind connection to LDAP ", dcServer));
+					//cannot connect to the server. It would be processed later.
 
 				}
 			});

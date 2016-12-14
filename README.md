@@ -35,7 +35,7 @@ An application supports these options:
 **Default**: none  
 **Required**: false
 
-`domainController:`domain controller FQDN.  
+`domainControllers:`domain controllers FQDN.  
 **Default**: none  
 **Required**: true 
 
