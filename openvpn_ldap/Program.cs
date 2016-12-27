@@ -62,6 +62,7 @@ namespace Mono_ldap
 		{
 			string username = Environment.GetEnvironmentVariable("username");
 			string password = Environment.GetEnvironmentVariable("password");
+            OpenVPNConfig config;
 			if (String.IsNullOrEmpty(username) || String.IsNullOrEmpty(password))
 			{
 				Console.WriteLine("Auth failed. Reason: environment variables username or password undefined.");
@@ -73,65 +74,66 @@ namespace Mono_ldap
 			*/
 
 
+			try
+			{
+				config = new OpenVPNConfig(ConfigurationManager.AppSettings["domain"], ConfigurationManager.AppSettings["accessGroups"], ConfigurationManager.AppSettings["deniedGroups"],
+											 ConfigurationManager.AppSettings["domainControllers"], ConfigurationManager.AppSettings["domainControllerPort"],
+														 ConfigurationManager.AppSettings["enableSSL"], username, password);
+
+            }catch
+			{
+				Console.WriteLine("Auth failed. Reason: something wrong in the configuration file");
+				return 1;
+			}
+
 
 			try
 			{
-				OpenVPNConfig config = new OpenVPNConfig(ConfigurationManager.AppSettings["domain"], ConfigurationManager.AppSettings["accessGroups"], ConfigurationManager.AppSettings["deniedGroups"],
-											 ConfigurationManager.AppSettings["domainControllers"], ConfigurationManager.AppSettings["domainControllerPort"],
-														 ConfigurationManager.AppSettings["enableSSL"], username, password);
-				try
+				//create connection to Ldap
+				LdapConnection connection = BuildConnection(config);
+				//connection succeed, login and password are correct and testing rejectGroup membership
+				if (config.DeniedGroups.Length != 0)
 				{
-					//create connection to Ldap
-					LdapConnection connection = BuildConnection(config);
-					//connection succeed, login and password are correct and testing rejectGroup membership
-					if (config.DeniedGroups.Length != 0)
+					//rejectGroup is not null. Testing												
+					if (isUserInGroups(config.Username, connection, config.DomainDC, config.DeniedGroups))
 					{
-						//rejectGroup is not null. Testing												
-						if (isUserInGroups(config.Username, connection, config.DomainDC, config.DeniedGroups))
-						{
-							//user was found in rejectGroup
-							//AUTH FAILED. EXIT
-							connection.Disconnect();
-							Console.WriteLine("Auth failed for: '{0}'. Reason: user was found in the reject group.", config.Username);
-							return 1;
-						}
+						//user was found in rejectGroup
+						//AUTH FAILED. EXIT
+						connection.Disconnect();
+						Console.WriteLine("Auth failed for: '{0}'. Reason: user was found in the reject group.", config.Username);
+						return 1;
 					}
-					if (config.AccessGroups.Length != 0)
+				}
+				if (config.AccessGroups.Length != 0)
+				{
+					//permitGroup is not null. Testing												
+			    	if (isUserInGroups(config.Username, connection, config.DomainDC, config.AccessGroups))
 					{
-						//permitGroup is not null. Testing												
-						if (isUserInGroups(config.Username, connection, config.DomainDC, config.AccessGroups))
-						{
-							//user was found in permit Group
-							//AUTH PASSED
-							connection.Disconnect();
-							Console.WriteLine("Auth success for: '{0}'.", config.Username);
-							return 0;
-
-						}
-						else {
-							//user wasn't found in permitGroup
-							//AUTH FAILED. EXIT
-							connection.Disconnect();
-							Console.WriteLine("Auth failed for: '{0}'. Reason: user wasn't found in the permit group.", config.Username);
-							return 1;
-						}
+						//user was found in permit Group
+						//AUTH PASSED
+						connection.Disconnect();
+						Console.WriteLine("Auth success for: '{0}'.", config.Username);
+						return 0;
 
 					}
-					connection.Disconnect();
-					//All tests passed.
-					//AUTH PASS. SUCCESS.
-					Console.WriteLine("Auth success for: '{0}'.", config.Username);
-					return 0;
+					else {
+						//user wasn't found in permitGroup
+						//AUTH FAILED. EXIT
+						connection.Disconnect();
+						Console.WriteLine("Auth failed for: '{0}'. Reason: user wasn't found in the permit group.", config.Username);
+						return 1;
+					}
+
 				}
-				catch 
-				{
-					Console.WriteLine("Auth failed for: '{0}'", config.Username);
-					return 1;
-				}
+				connection.Disconnect();
+				//All tests passed.
+				//AUTH PASS. SUCCESS.
+				Console.WriteLine("Auth success for: '{0}'.", config.Username);
+				return 0;
 			}
-			catch
+			catch 
 			{
-				Console.WriteLine("Auth failed. Reason: something wrong in the configuration file");
+				Console.WriteLine("Auth failed for: '{0}'", config.Username);
 				return 1;
 			}
 
